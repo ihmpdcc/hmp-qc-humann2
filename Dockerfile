@@ -110,12 +110,29 @@ RUN mv /dbs/humann2/metaphlan/mpa_v20_m200.* /dbs/humann2/metaphlan/mpa_v20_m200
 COPY execute_pipeline.py /opt/scripts/execute_pipeline.py
 RUN chmod 755 /opt/scripts/execute_pipeline.py
 
+
+#USER root
+#WORKDIR /usr/local/ncbi
+
+#RUN apt-get -y -m update && apt-get install -y curl cpanminus libxml-simple-perl libwww-perl libnet-perl && rm -rf /var/lib/apt/lists/*
+
+#RUN curl -s ftp://ftp.ncbi.nlm.nih.gov/entrez/entrezdirect/edirect.tar.gz | \
+# tar xzf - && \
+# cpanm HTML::Entities && \
+# edirect/setup.sh
+
+#COPY installconfirm /usr/local/ncbi/edirect/
+
+#ENV PATH="/usr/local/ncbi/edirect:${PATH}"
+
+#WORKDIR /root
+
+
 # Change to root directory
 WORKDIR /
 RUN mkdir /root/.ncbi
 COPY user-settings.mkfg /root/.ncbi
 RUN chmod 755 /root/.ncbi/user-settings.mkfg
-
 
 ENTRYPOINT ["python3","-u","/opt/scripts/execute_pipeline.py"]
 #ENTRYPOINT ["bash","/opt/scripts/execute_pipeline.sh"]
