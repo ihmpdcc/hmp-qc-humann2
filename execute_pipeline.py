@@ -45,7 +45,7 @@ def main():
     parser.add_argument('-s', '--samp', type=str, required=True, help='SRS ID or list file containing paths to sample files located either in an S3 bucket or locally')
     parser.add_argument('-r', '--srr_list', type=str, required=True, help='SRR_list')
     parser.add_argument('-p', '--input_pair', type=str, required=False, help='paired-file')
-    parser.add_argument('-m', '--mode', type=str, required=False, help='mode: qc, humann2, both',choices=['qc', 'humann2', 'both'])
+    parser.add_argument('-m', '--mode', type=str, required=False, help='mode: qc, humann2, metaphlan, both',choices=['qc', 'humann2', 'metaphlan', 'both'])
     parser.add_argument('-b', '--bucket', type=str, required=False, help='Path to S3 bucket')
     
 
@@ -67,7 +67,8 @@ def main():
     os.mkdir("input_seqs")
 
     samp = args.samp
-    samp_id = samp.split('_', 1)[0]
+    #samp_id = samp.split('_', 1)[0]
+    samp_id = samp
 
     #SRR List is not provided. Get list from SRA. Not working yet
     if args.srr_list is None:
@@ -109,7 +110,7 @@ def main():
         print("\nDownloading files from S3 bucket...\n")
         f.write("Downloading files from S3 bucket...\n")
         for srr in srr_list:
-            failure = os.system("aws s3 cp " + srr + " input_seqs/")
+            failure = os.system("aws s3 cp " + srr + " input_seqs/ --quiet")
             if failure:
                 print ("Failed to download " + srr + " from S3 bucket")
                 sys.exit(1)
@@ -118,10 +119,9 @@ def main():
                 os.system("gunzip input_seqs/" + ntpath.basename(srr))    
             elif srr.endswith('.bz2'):
                 os.system("bzip2 -d input_seqs/" + ntpath.basename(srr))
-                
 
     #SRR list with SRR IDs provided
-    else:
+    elif args.srr_list.startswith('SRR'):
         summ_file = samp_id + "_summary_stats.txt"
         f = open(summ_file, 'w')
         srr_list = (args.srr_list).split(",")
@@ -226,6 +226,20 @@ def main():
                     }
             json_string.append(sra_download)
 
+    #Input files are local
+    else:
+        summ_file = samp_id + "_summary_stats.txt"
+        f = open(summ_file, 'w')
+        srr_list = (args.srr_list).split(",")
+        for srr in srr_list:
+            failure = os.system("cp input/" + srr + " input_seqs/")
+            if failure:
+                print ("Failed to copy " + srr + " from local directory")
+                sys.exit(1)
+            if srr.endswith('gz'):
+                os.system("gunzip input_seqs/" + ntpath.basename(srr))
+            elif srr.endswith('.bz2'):
+                os.system("bzip2 -d input_seqs/" + ntpath.basename(srr))
     
     #Concatenate downloaded files 
     if glob.glob("input_seqs/*_1.fastq"):
@@ -477,6 +491,9 @@ def main():
             os.system("cat input/" + args.input + " input/" + args.input_pair + " >  final_output/" + srr + "_qc.fastq")
         humann2()
         os.system("mm final_output/" + samp_id +  "_qc.fastq")
+    elif args.mode == 'metaphlan':
+        f.write("\nRunning MetaPhlAn2 only...\n")
+        metaphlan()
     else:
         f.write("\nRunning both QC and HUMAnN2...\n")
         qc()
@@ -621,12 +638,15 @@ def humann2():
     print("\nHUMAnN2 starting...\n")
     return_code = os.system("humann2 --input final_output/" + samp_id + "_qc.fastq --output humann2_output --threads 6 --metaphlan-options=\"--mpa_pkl /dbs/humann2/metaphlan/mpa_v20_m200.pkl --bowtie2db /dbs/humann2/metaphlan/mpa_v20_m200\"")
     if return_code != 0:
-        sys.exit("HUMAnN2 failed" + return_code)
+        sys.exit("HUMAnN2 failed: " + str(return_code))
 
     os.system("mv humann2_output/*_genefamilies.tsv final_output/" + samp_id + "_humann2_genefamilies.tsv")
     os.system("mv humann2_output/*_pathcoverage.tsv final_output/" + samp_id + "_humann2_pathcoverage.tsv")
     os.system("mv humann2_output/*_pathabundance.tsv final_output/" + samp_id + "_humann2_pathabundance.tsv")
-
+    os.system("mv humann2_output/*_pathabundance.tsv final_output/" + samp_id + "_humann2_pathabundance.tsv")
+    os.system("mv humann2_output/*_humann2_temp/*metaphlan_bugs_list.tsv final_output/" + samp_id + "_metaphlan_bugs_list.tsv")
+    #os.system("mv humann2_output/*_humann2_temp/*metaphlan_bowtie2.txt final_output/" + samp_id + "_metaphlan_bowtie2.txt")
+    
     os.system("mv humann2_output/*_humann2_temp/*.log log.txt")
     
     #remove extra ouput files
@@ -675,6 +695,7 @@ def humann2():
     hash_gf = hashlib.sha256(open("final_output/" + samp_id + "_humann2_genefamilies.tsv",'rb').read()).hexdigest()
     hash_pc = hashlib.sha256(open("final_output/" + samp_id + "_humann2_pathcoverage.tsv",'rb').read()).hexdigest()
     hash_pa = hashlib.sha256(open("final_output/" + samp_id + "_humann2_pathabundance.tsv",'rb').read()).hexdigest()
+    hash_bl = hashlib.sha256(open("final_output/" + samp_id + "_metaphlan_bugs_list.tsv",'rb').read()).hexdigest()
 
     bz_gf = bz2.compress(open("final_output/" + samp_id + "_humann2_genefamilies.tsv", 'rb').read())
     humann_gf_bz = "final_output/" + samp_id + "_humann2_genefamilies.tsv.bz2"
@@ -694,13 +715,21 @@ def humann2():
     fh.write(bz_pa)
     fh.close()
 
+    bz_bl = bz2.compress(open("final_output/" + samp_id + "_metaphlan_bugs_list.tsv", 'rb').read())
+    humann_bl_bz = "final_output/" + samp_id + "_metaphlan_bugs_list.tsv.bz2"
+    fh = open(humann_bl_bz, "wb")
+    fh.write(bz_bl)
+    fh.close()
+
     size_gf = os.path.getsize("final_output/" + samp_id + "_humann2_genefamilies.tsv")
     size_pc = os.path.getsize("final_output/" + samp_id + "_humann2_pathcoverage.tsv")
     size_pa = os.path.getsize("final_output/" + samp_id + "_humann2_pathabundance.tsv")
+    size_bl = os.path.getsize("final_output/" + samp_id + "_metaphlan_bugs_list.tsv")
 
     size_gf_bz = os.path.getsize("final_output/" + samp_id + "_humann2_genefamilies.tsv.bz2")
     size_pc_bz = os.path.getsize("final_output/" + samp_id + "_humann2_pathcoverage.tsv.bz2")
     size_pa_bz = os.path.getsize("final_output/" + samp_id + "_humann2_pathabundance.tsv.bz2")
+    size_bl_bz = os.path.getsize("final_output/" + samp_id + "_metaphlan_bugs_list.tsv.bz2")
 
     os.system("rm -r final_output/*.tsv")
 
@@ -720,8 +749,12 @@ def humann2():
             "\n" + samp_id + "_pathcoverage_file_name: " +  samp_id + "_humann2_pathcoverage.tsv.bz2" + \
             "\n" + samp_id + "_pathcoverage_file_size_uncompressed: " + str(size_pc) + \
             "\n" + samp_id + "_pathcoverage_file_size_compressed: " + str(size_pc_bz) + \
-            "\n" + samp_id + "_pathcoverage_sha256: " + hash_pc)
-    
+            "\n" + samp_id + "_pathcoverage_sha256: " + hash_pc + \
+            "\n" + samp_id + "_metaphlan_buglist_file_name: " +  samp_id + "_metaphlan_bugs_list.tsv.bz2" + \
+            "\n" + samp_id + "_metaphlan_buglist_file_size_uncompressed: " + str(size_bl) + \
+            "\n" + samp_id + "_metaphlan_buglist_file_size_compressed: " + str(size_bl_bz) + \
+            "\n" + samp_id + "_metaphlan_buglist_sha256: " + hash_bl)
+
     humann_string = {
             'humann2':{
                 'software':{
@@ -750,11 +783,61 @@ def humann2():
                     'file_size': size_pc_bz,
                     'file_size_uncompressed': size_pc,
                     'sha256': hash_pc
+                    },
+                'metaphlan_buglist':{
+                    'file_name': samp_id + "_metaphlan_bugs_list.tsv.bz2",
+                    'file_size': size_bl_bz,
+                    'file_size_uncompressed': size_bl,
+                    'sha256': hash_bl
                     }
                 }
             }
     json_string.append(humann_string)
     print("HUMAnN2 complete...\n")
+
+
+def metaphlan():
+    print("\nMetaPhlAn2 starting...\n")
+    in_file = os.listdir("input_seqs")[0]
+    return_code = os.system("/opt/MetaPhlAn-2.7.8/metaphlan2.py input_seqs/" + in_file + " --mpa_pkl /dbs/humann2/metaphlan/mpa_v20_m200/mpa_v20_m200.pkl --bowtie2db /dbs/humann2/metaphlan/mpa_v20_m200 -o /final_output/" + samp_id + "_metaphlan_bugs_list.tsv --input_type multifastq --bowtie2out metaphlan_bowtie2.txt --nproc 6")
+    if return_code != 0:
+        sys.exit("MetaPhlan2 failed: " + str(return_code))
+
+    hash_bl = hashlib.sha256(open("final_output/" + samp_id + "_metaphlan_bugs_list.tsv",'rb').read()).hexdigest()
+
+    bz_bl = bz2.compress(open("final_output/" + samp_id + "_metaphlan_bugs_list.tsv", 'rb').read())
+    humann_bl_bz = "final_output/" + samp_id + "_metaphlan_bugs_list.tsv.bz2"
+    fh = open(humann_bl_bz, "wb")
+    fh.write(bz_bl)
+    fh.close()
+
+    size_bl = os.path.getsize("final_output/" + samp_id + "_metaphlan_bugs_list.tsv")
+
+    size_bl_bz = os.path.getsize("final_output/" + samp_id + "_metaphlan_bugs_list.tsv.bz2")
+
+    os.system("rm metaphlan_bowtie2.txt")
+
+    os.system("touch out.txt")
+    os.system("rm -r final_output/*.tsv")
+
+    f.write("\n" + samp_id + "_metaphlan_buglist_file_name: " +  samp_id + "_metaphlan_bugs_list.tsv.bz2" + \
+            "\n" + samp_id + "_metaphlan_buglist_file_size_uncompressed: " + str(size_bl) + \
+            "\n" + samp_id + "_metaphlan_buglist_file_size_compressed: " + str(size_bl_bz) + \
+            "\n" + samp_id + "_metaphlan_buglist_sha256: " + hash_bl)
+
+    humann_string = {
+            'humann2':{
+                'metaphlan_buglist':{
+                    'file_name': samp_id + "_metaphlan_bugs_list.tsv.bz2",
+                    'file_size': size_bl_bz,
+                    'file_size_uncompressed': size_bl,
+                    'sha256': hash_bl
+                    }
+                }
+            }
+    json_string.append(humann_string)
+    print("MetaPhlAnN2 complete...\n")
+
 
 
 if __name__ == '__main__':
