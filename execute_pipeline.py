@@ -7,14 +7,14 @@ Author: Kemi Ifeonu
 
 Input: 
 - An SRR ID or a set of fastq files 
-- Mode: run qc only, humann2 only, or both
+- Mode: run qc only, humann2 only, both (qc & humann), or metaphlan only
 - S3_path if 
 - AWS credentials
 
 Output:
 - Statistics file 
 - QC'ed files
-- HUMAnN2 Output files: _humann2_genefamilies.tsv, _humann2_pathabundance.tsv, _humann2_pathcoverage.tsv
+- HUMAnN2 Output files: _humann2_genefamilies.tsv, _humann2_pathabundance.tsv, _humann2_pathcoverage.tsv, _metaphlan_bugs_list.tsv
 
 '''
 
@@ -110,7 +110,8 @@ def main():
         print("\nDownloading files from S3 bucket...\n")
         f.write("Downloading files from S3 bucket...\n")
         for srr in srr_list:
-            failure = os.system("aws s3 cp " + srr + " input_seqs/ --quiet")
+            failure = os.system("aws s3 cp " + srr + " input_seqs/")
+            print (failure)
             if failure:
                 print ("Failed to download " + srr + " from S3 bucket")
                 sys.exit(1)
@@ -250,6 +251,8 @@ def main():
         os.system("cat input_seqs/*_1.fq > input_seqs/" + samp_id + "_1.fastq")
     elif glob.glob("input_seqs/*_R1.fq"):
         os.system("cat input_seqs/*_R1.q > input_seqs/" + samp_id + "_1.fastq")
+    elif args.mode == 'metaphlan':
+        os.system("cat input_seqs/* > input_seqs/" + samp_id + "_1.fastq")
     else:
         print("Input files do not follow naming convention *_1.fq, *_1.fastq, *_R1.fq  or *_R1.fastq\n")
         sys.exit(1)
@@ -642,7 +645,6 @@ def humann2():
 
     os.system("mv humann2_output/*_genefamilies.tsv final_output/" + samp_id + "_humann2_genefamilies.tsv")
     os.system("mv humann2_output/*_pathcoverage.tsv final_output/" + samp_id + "_humann2_pathcoverage.tsv")
-    os.system("mv humann2_output/*_pathabundance.tsv final_output/" + samp_id + "_humann2_pathabundance.tsv")
     os.system("mv humann2_output/*_pathabundance.tsv final_output/" + samp_id + "_humann2_pathabundance.tsv")
     os.system("mv humann2_output/*_humann2_temp/*metaphlan_bugs_list.tsv final_output/" + samp_id + "_metaphlan_bugs_list.tsv")
     #os.system("mv humann2_output/*_humann2_temp/*metaphlan_bowtie2.txt final_output/" + samp_id + "_metaphlan_bowtie2.txt")
